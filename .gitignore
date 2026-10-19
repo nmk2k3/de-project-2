@@ -1,1 +1,9 @@
-.venv
+.env
+.venv/
+__pycache__/
+*.pyc
+logs/
+output/
+checkpoint.json
+checkpoint.json.tmp
+debug_response.html
