@@ -1,4 +1,5 @@
 """Durable batch files, checkpoint validation, and append-only failure logs."""
+from fileinput import filename
 import hashlib
 import json
 import os
@@ -225,7 +226,13 @@ def log_failure(settings: Settings, product_id: str, batch_number: int,
         "reason": str(error),
     }
     settings.logs_dir.mkdir(parents=True, exist_ok=True)
-    with (settings.logs_dir / "failed.jsonl").open("a", encoding="utf-8") as stream:
+    filename = (
+        "failed_404.jsonl"
+        if getattr(error, "http_status", None) == 404
+        else "failed_other.jsonl"
+    )
+
+    with (settings.logs_dir / filename).open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(failure, ensure_ascii=False) + "\n")
         stream.flush()
         os.fsync(stream.fileno())

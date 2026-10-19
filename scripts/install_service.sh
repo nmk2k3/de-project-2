@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 PYTHON_PATH="$PROJECT_DIR/.venv/bin/python"
 CURRENT_USER="$(id -un)"
-SERVICE_NAME="tiki-etl.service"
+SERVICE_NAME="de-project-2-etl.service"
 
 if [[ "$EUID" -eq 0 ]]; then
     echo "Run as your normal Linux user (script will use sudo when needed)." >&2

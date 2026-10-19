@@ -162,7 +162,7 @@ class IntegrityTests(unittest.TestCase):
         final2 = json.loads(output_paths(self.settings, 2)[1].read_text())
         self.assertEqual([p["id"] for p in final1 + final2], [101, 102, 103, 105])
         failures = [json.loads(s) for s in
-                    (self.settings.logs_dir / "failed.jsonl").read_text().splitlines()]
+                    (self.settings.logs_dir / "failed_404.jsonl").read_text().splitlines()]
         self.assertEqual(len(failures), 1)
         self.assertEqual((failures[0]["global_position"], failures[0]["http_status"]), (4, 404))
 

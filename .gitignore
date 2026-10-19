@@ -7,3 +7,4 @@ output/
 checkpoint.json
 checkpoint.json.tmp
 debug_response.html
+.pipeline.lock
