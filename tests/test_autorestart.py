@@ -54,6 +54,8 @@ class AutoRestartTests(unittest.TestCase):
             self.assertEqual(outcome, PipelineResult.COMPLETED)
             self.assertEqual(client.fetch.call_args_list[0].args[0], "102")
             self.assertEqual(load_checkpoint(self.settings, 3, fingerprint_ids(self.ids)), 3)
+            final = json.loads((self.settings.output_dir / "products_001.json").read_text())
+            self.assertEqual([p["id"] for p in final], [101, 102, 103])
 
     def test_access_challenge_does_not_signal_auto_restart(self):
         with patch("app.pipeline.ProductClient") as cls:

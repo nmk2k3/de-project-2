@@ -33,7 +33,7 @@ class SplitFailureLogTests(unittest.TestCase):
         path = self.settings.logs_dir / name
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
-    def test_http_404_only_in_404_file(self):
+    def test_http_404_appends_only_to_404_file(self):
         self.record("101", 1, FetchError("missing", http_status=404, curl_exit_code=0))
         self.record("102", 2, FetchError("missing", http_status=404, curl_exit_code=22))
         errors = self.read_records("failed_404.jsonl")
@@ -50,11 +50,6 @@ class SplitFailureLogTests(unittest.TestCase):
         self.assertEqual([record["id"] for record in errors], ["103", "104", "105", "106"])
         self.assertEqual(errors[0]["curl_exit_code"], 28)
         self.assertFalse((self.settings.logs_dir / "failed_404.jsonl").exists())
-
-    def test_appends_without_overwriting(self):
-        self.record("101", 1, FetchError("not found", http_status=404))
-        self.record("102", 2, FetchError("not found", http_status=404))
-        self.assertEqual(len(self.read_records("failed_404.jsonl")), 2)
 
 
 if __name__ == "__main__":

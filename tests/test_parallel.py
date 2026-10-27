@@ -1,4 +1,4 @@
-"""Offline concurrency, persistence, shutdown and latency comparisons."""
+"""Offline concurrency, persistence, and shutdown regressions."""
 import json
 import tempfile
 import threading
@@ -78,9 +78,7 @@ class ParallelTests(unittest.TestCase):
         def request(command, **kwargs):
             pid = command[-1].rsplit("/", 1)[-1]
             barrier.wait(timeout=2)
-            if pid == "101":
-                time.sleep(0.04)
-            elif pid == "102":
+            if pid != "103":
                 self.assertTrue(third_done.wait(2))
             finished.append(pid)
             if pid == "103":
@@ -240,10 +238,9 @@ class ParallelTests(unittest.TestCase):
         self.assertFalse(any(t.name.startswith("ThreadPoolExecutor")
                              for t in threading.enumerate()))
 
-    def test_parallel_matches_sequential_output_and_reduces_latency(self):
-        ids = [str(101 + i) for i in range(9)]
+    def test_parallel_matches_sequential_output_and_bounds_concurrency(self):
+        ids = [str(101 + i) for i in range(6)]
         outputs = []
-        elapsed = []
         peaks = []
         writer_threads = []
         original_open = Path.open
@@ -256,34 +253,36 @@ class ParallelTests(unittest.TestCase):
         for workers in (1, 3):
             root = self.settings.root / str(workers)
             settings = replace(self.settings, root=root, csv_file=root / "ids.csv",
-                               max_workers=workers, request_delay=0.02)
+                               max_workers=workers)
             self.write_ids(settings, ids)
             active = 0
             peak = 0
             lock = threading.Lock()
+            first_wave = threading.Barrier(workers)
 
             def request(command, **kwargs):
                 nonlocal active, peak
                 with lock:
                     active += 1
                     peak = max(peak, active)
-                time.sleep(0.12)
-                with lock:
-                    active -= 1
-                return response(command[-1].rsplit("/", 1)[-1])
+                pid = command[-1].rsplit("/", 1)[-1]
+                try:
+                    # Prove requests overlap without depending on machine speed.
+                    if pid in ids[:workers]:
+                        first_wave.wait(timeout=2)
+                    return response(pid)
+                finally:
+                    with lock:
+                        active -= 1
 
-            started = time.perf_counter()
             with patch("app.client.subprocess.run", side_effect=request), \
                     patch.object(Path, "open", open_file):
                 self.assertEqual(run_pipeline(settings), PipelineResult.COMPLETED)
-            elapsed.append(time.perf_counter() - started)
             peaks.append(peak)
             outputs.append((settings.output_dir / "products_001.json").read_bytes())
+            self.assertEqual(self.cursor(settings, ids), len(ids))
+            self.assertEqual([p["id"] for p in json.loads(outputs[-1])],
+                             [int(pid) for pid in ids])
         self.assertEqual(outputs[0], outputs[1])
         self.assertEqual(peaks, [1, 3])
         self.assertEqual(set(writer_threads), {threading.get_ident()})
-        # Generous margin: simulated I/O latency dominates; no live API traffic.
-        self.assertLess(elapsed[1], elapsed[0] * 0.8)
-        print(f"Mock benchmark (9 IDs, 120ms latency, 20ms global spacing): "
-              f"sequential={elapsed[0]:.3f}s, parallel={elapsed[1]:.3f}s, "
-              f"speedup={elapsed[0] / elapsed[1]:.2f}x")
