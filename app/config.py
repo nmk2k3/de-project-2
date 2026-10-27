@@ -23,10 +23,11 @@ class Settings:
     max_security_retries: int
     max_network_retries: int = 2
     retry_base_delay: float = 2.0
+    max_workers: int = 3
 
     def __post_init__(self) -> None:
         """Validate direct construction as well as environment-loaded settings."""
-        for name in ("batch_size", "checkpoint_every", "request_timeout"):
+        for name in ("batch_size", "checkpoint_every", "request_timeout", "max_workers"):
             value = getattr(self, name)
             if type(value) is not int or value <= 0:
                 raise ValueError(f"{name.upper()} must be a positive integer")
@@ -77,4 +78,5 @@ def load_settings() -> Settings:
         max_security_retries=int(os.getenv("MAX_SECURITY_RETRIES", "2")),
         max_network_retries=int(os.getenv("MAX_NETWORK_RETRIES", "2")),
         retry_base_delay=float(os.getenv("RETRY_BASE_DELAY", "2")),
+        max_workers=int(os.getenv("MAX_WORKERS", "3")),
     )

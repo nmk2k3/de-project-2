@@ -5,6 +5,8 @@ The caller owns security-challenge handling and checkpoint persistence.
 import json
 import subprocess
 import time
+from concurrent.futures import CancelledError
+from threading import Lock
 
 from .config import Settings
 
@@ -23,6 +25,10 @@ class FetchError(Exception):
 class SecurityChallengeError(FetchError):
     """HTML security response or existing HTTP 403/429 handling."""
 
+    def __init__(self, *args, response_body=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.response_body = response_body
+
 
 class TransientFetchError(FetchError):
     """Network or server error that may succeed when retried."""
@@ -33,18 +39,35 @@ class RetryExhaustedError(FetchError):
 
 
 class ProductClient:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, stop_event=None):
         self.settings = settings
+        self.stop_event = stop_event
         self.last_request_start = None
+        self._pace_lock = Lock()
+
+    def _check_stopped(self):
+        if self.stop_event is not None and self.stop_event.is_set():
+            raise CancelledError("Request stopped before another attempt")
+
+    def _wait(self, delay):
+        if self.stop_event is None:
+            time.sleep(delay)
+        elif self.stop_event.wait(delay):
+            raise CancelledError("Request stopped while waiting")
 
     def _pace(self):
         # At least request_delay between the start of ALL attempts, even retries.
-        now = time.perf_counter()
-        if self.last_request_start is not None:
-            remaining = self.settings.request_delay - (now - self.last_request_start)
-            if remaining > 0:
-                time.sleep(remaining)
-        self.last_request_start = time.perf_counter()
+        # One shared client/lock for the whole crawl, not one limiter per worker.
+        with self._pace_lock:
+            self._check_stopped()
+            if self.last_request_start is not None:
+                remaining = self.settings.request_delay - (
+                    time.perf_counter() - self.last_request_start
+                )
+                if remaining > 0:
+                    self._wait(remaining)
+            self._check_stopped()
+            self.last_request_start = time.perf_counter()
 
     def _fetch_once(self, product_id: str) -> dict:
         self._pace()
@@ -81,14 +104,11 @@ class ProductClient:
 
         # Preserve the existing BytePlus / access-check path in pipeline.py.
         if is_html or status in (403, 429):
-            if is_html:
-                (self.settings.root / "debug_response.html").write_text(
-                    body, encoding="utf-8"
-                )
             raise SecurityChallengeError(
                 f"HTTP {status}: access/security check for product {product_id}",
                 http_status=http_status,
                 curl_exit_code=result.returncode,
+                response_body=body if is_html else None,
             )
 
         if status >= 500:
@@ -147,4 +167,4 @@ class ProductClient:
                     f"in {delay:g}s...",
                     flush=True,
                 )
-                time.sleep(delay)
+                self._wait(delay)

@@ -16,6 +16,9 @@ Run from the **repository root** in Ubuntu WSL:
 # Only the retry tests
 .venv/bin/python -m unittest discover -s tests -p 'test_retry.py' -v
 
+# Concurrency safety and mocked sequential/parallel performance comparison
+.venv/bin/python -m unittest discover -s tests -p 'test_parallel.py' -v
+
 # Only auto-restart behavior tests
 .venv/bin/python -m unittest discover -s tests -p 'test_autorestart.py' -v
 
@@ -31,10 +34,11 @@ Syntax: `-m unittest` runs the testing module, `discover` finds test files, `-s 
 |---|---|
 | `test_integrity.py` | CSV fingerprint/order, partial-versus-checkpoint consistency, corrupted/missing output, atomic write errors, batch finalization/recovery, HTML cleanup, Ctrl+C and HTTP failures |
 | `test_retry.py` | HTTP 503 retry and success, timeout retry, HTTP 404 without retry, exhausted retry stops on the same ID |
+| `test_parallel.py` | Shared pacing including retries, out-of-order resume, main-thread-only writes, security cancellation/cooldown, worker failure, interruption, bounded concurrency and sequential/parallel output equivalence |
 | `test_autorestart.py` | Main exit statuses, supervisor restart signaling, security pause behavior, SIGTERM checkpoint save, rejection of a second process |
 | `test_failure_logging.py` | HTTP 404 only in `failed_404.jsonl`, other failures in `failed_other.jsonl`, append behavior |
 
-**Reference result for the supplied code snapshot:** `Ran 25 tests ... OK` (verified offline). Test counts can change as the project evolves.
+The parallel test module prints a reproducible offline benchmark: nine mocked responses with 120ms latency and the same 20ms global request spacing for both `MAX_WORKERS=1` and `MAX_WORKERS=3`. It checks identical output bytes, the concurrency bound, and a conservative latency improvement. Timing includes local persistence overhead and varies by machine; it is not a production throughput guarantee. No live API requests are made.
 
 ## How mocking works
 

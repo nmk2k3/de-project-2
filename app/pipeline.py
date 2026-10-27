@@ -1,11 +1,13 @@
 """Orchestrate batches without knowing cURL, JSON serialization or .env details."""
 import time
 from enum import Enum, auto
+from threading import Event
 
 import pandas as pd
 
 from .client import FetchError, ProductClient, SecurityChallengeError, RetryExhaustedError
 from .config import Settings
+from .parallel import OrderedFetcher
 from .storage import (
     finish_batch,
     fingerprint_ids,
@@ -63,7 +65,7 @@ def _wait_for_security_retry(settings: Settings, retries: int,
 
 def _run_batch(settings: Settings, client: ProductClient, product_ids: list[str],
                batch_start: int, checkpoint_index: int,
-               ids_fingerprint: str) -> PipelineResult | None:
+               ids_fingerprint: str, stop_event: Event) -> PipelineResult | None:
     """Commit one batch, or save its cursor and return an early-stop outcome."""
     total_ids = len(product_ids)
     batch_end = min(batch_start + settings.batch_size, total_ids)
@@ -73,6 +75,9 @@ def _run_batch(settings: Settings, client: ProductClient, product_ids: list[str]
         ids_fingerprint, product_ids
     )
     start_time = time.perf_counter()
+    stop_event.clear()
+    fetcher = OrderedFetcher(client, product_ids, next_index, batch_end,
+                             settings.max_workers, stop_event)
 
     try:
         for index in range(next_index, batch_end):
@@ -91,9 +96,13 @@ def _run_batch(settings: Settings, client: ProductClient, product_ids: list[str]
                 security_retries = 0
                 while True:
                     try:
-                        data = client.fetch(product_id)
+                        data = fetcher.fetch(index)
                         break
                     except SecurityChallengeError as error:
+                        if error.response_body is not None:
+                            (settings.root / "debug_response.html").write_text(
+                                error.response_body, encoding="utf-8"
+                            )
                         log_failure(settings, product_id, batch_number,
                                     batch_position, global_position, "security", error)
                         save_progress(settings, batch_number, batch_start,
@@ -134,6 +143,7 @@ def _run_batch(settings: Settings, client: ProductClient, product_ids: list[str]
                               next_index, products, total_ids, ids_fingerprint)
 
     except KeyboardInterrupt:
+        stop_event.set()
         if next_index == batch_end:
             finish_batch(settings, batch_number, batch_start, batch_end,
                          products, total_ids, ids_fingerprint)
@@ -143,6 +153,15 @@ def _run_batch(settings: Settings, client: ProductClient, product_ids: list[str]
                           next_index, products, total_ids, ids_fingerprint)
             print(f"\nStopped by Ctrl+C. Saved progress; resume at ID #{next_index + 1}.")
         return PipelineResult.INTERRUPTED
+
+    except Exception:
+        # Unexpected worker/coordinator failures must not skip the current ID.
+        stop_event.set()
+        save_progress(settings, batch_number, batch_start,
+                      next_index, products, total_ids, ids_fingerprint)
+        raise
+    finally:
+        fetcher.close()
 
     finish_batch(settings, batch_number, batch_start, batch_end,
                  products, total_ids, ids_fingerprint)
@@ -166,10 +185,11 @@ def run_pipeline(settings: Settings) -> PipelineResult:
         return PipelineResult.COMPLETED
 
     first_batch_start = (checkpoint_index // settings.batch_size) * settings.batch_size
-    client = ProductClient(settings)
+    stop_event = Event()
+    client = ProductClient(settings, stop_event=stop_event)
     for batch_start in range(first_batch_start, total_ids, settings.batch_size):
         outcome = _run_batch(settings, client, product_ids, batch_start,
-                             checkpoint_index, ids_fingerprint)
+                             checkpoint_index, ids_fingerprint, stop_event)
         if outcome is not None:
             return outcome
         batch_end = min(batch_start + settings.batch_size, total_ids)
