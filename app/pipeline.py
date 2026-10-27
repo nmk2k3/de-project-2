@@ -7,6 +7,7 @@ import pandas as pd
 
 from .client import FetchError, ProductClient, SecurityChallengeError, RetryExhaustedError
 from .config import Settings
+from .health import Progress
 from .parallel import OrderedFetcher
 from .storage import (
     finish_batch,
@@ -44,7 +45,7 @@ def _load_product_ids(settings: Settings) -> list[str]:
 
 
 def _wait_for_security_retry(settings: Settings, retries: int,
-                             global_position: int) -> bool:
+                             global_position: int, progress: Progress) -> bool:
     """Return whether to retry, after the caller has saved the current ID."""
     if retries >= settings.max_security_retries:
         print(
@@ -59,13 +60,15 @@ def _wait_for_security_retry(settings: Settings, retries: int,
         f"the same ID ({retries + 1}/{settings.max_security_retries})...",
         flush=True,
     )
+    progress.update("cooldown", wait=settings.security_retry_delay)
     time.sleep(settings.security_retry_delay)
     return True
 
 
 def _run_batch(settings: Settings, client: ProductClient, product_ids: list[str],
                batch_start: int, checkpoint_index: int,
-               ids_fingerprint: str, stop_event: Event) -> PipelineResult | None:
+               ids_fingerprint: str, stop_event: Event,
+               progress: Progress) -> PipelineResult | None:
     """Commit one batch, or save its cursor and return an early-stop outcome."""
     total_ids = len(product_ids)
     batch_end = min(batch_start + settings.batch_size, total_ids)
@@ -96,6 +99,7 @@ def _run_batch(settings: Settings, client: ProductClient, product_ids: list[str]
                 security_retries = 0
                 while True:
                     try:
+                        progress.update("fetching", wait=progress.fetch_budget, force=False)
                         data = fetcher.fetch(index)
                         break
                     except SecurityChallengeError as error:
@@ -108,11 +112,12 @@ def _run_batch(settings: Settings, client: ProductClient, product_ids: list[str]
                         save_progress(settings, batch_number, batch_start,
                                       index, products, total_ids, ids_fingerprint)
                         if not _wait_for_security_retry(
-                                settings, security_retries, global_position):
+                                settings, security_retries, global_position, progress):
                             return PipelineResult.SECURITY_PAUSED
                         security_retries += 1
 
                 stage = "transform"
+                progress.update("processing", force=False)
                 product = transform_product(data)
                 if str(product["id"]) != str(product_id) or not product["name"]:
                     raise ValueError("Invalid product ID or name")
@@ -137,6 +142,7 @@ def _run_batch(settings: Settings, client: ProductClient, product_ids: list[str]
 
             # A completed ID (or ordinary failure) advances the cursor.
             next_index = index + 1
+            progress.update("processing", next_index=next_index, force=False)
             if ((next_index - batch_start) % settings.checkpoint_every == 0
                     and next_index < batch_end):
                 save_progress(settings, batch_number, batch_start,
@@ -175,10 +181,26 @@ def _run_batch(settings: Settings, client: ProductClient, product_ids: list[str]
 
 
 def run_pipeline(settings: Settings) -> PipelineResult:
+    progress = Progress(settings)
+    progress.update("starting")
+    try:
+        outcome = _run_pipeline(settings, progress)
+    except KeyboardInterrupt:
+        progress.update("interrupted")
+        raise
+    except Exception:
+        progress.update("failed")
+        raise
+    progress.update(outcome.name.lower())
+    return outcome
+
+
+def _run_pipeline(settings: Settings, progress: Progress) -> PipelineResult:
     product_ids = _load_product_ids(settings)
     total_ids = len(product_ids)
     ids_fingerprint = fingerprint_ids(product_ids)
     checkpoint_index = load_checkpoint(settings, total_ids, ids_fingerprint)
+    progress.update("starting", next_index=checkpoint_index)
     validate_previous_batch(settings, checkpoint_index, total_ids, ids_fingerprint, product_ids)
     if checkpoint_index == total_ids:
         print("Finished all product IDs.")
@@ -189,7 +211,7 @@ def run_pipeline(settings: Settings) -> PipelineResult:
     client = ProductClient(settings, stop_event=stop_event)
     for batch_start in range(first_batch_start, total_ids, settings.batch_size):
         outcome = _run_batch(settings, client, product_ids, batch_start,
-                             checkpoint_index, ids_fingerprint, stop_event)
+                             checkpoint_index, ids_fingerprint, stop_event, progress)
         if outcome is not None:
             return outcome
         batch_end = min(batch_start + settings.batch_size, total_ids)

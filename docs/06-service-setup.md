@@ -2,7 +2,7 @@
 
 This describes a **new installation** and also how to inspect an **already configured** installation.
 
-> **Important:** On the current machine, `de-project-2-etl.service` already exists and runs. The bundled installer creates `tiki-etl.service` by default. Do **not** run it as-is on that machine or you may have two different enabled services competing for the same ETL files. See the [installer explanation](07-install-service-script.md).
+> **Important:** The bundled installer targets `de-project-2-etl.service`. On an existing installation, inspect the deployed unit before running the installer; it would replace that unit. Do not enable another service against the same ETL files. See the [installer explanation](07-install-service-script.md).
 
 ## Part A — Prepare the project on Ubuntu WSL
 
@@ -48,10 +48,10 @@ bash scripts/install_service.sh --dry-run
 # Install the unit and enable it for WSL startup
 bash scripts/install_service.sh
 
-# The bundled script installs tiki-etl.service:
-sudo systemctl start tiki-etl.service
-sudo systemctl status tiki-etl.service --no-pager
-sudo journalctl -u tiki-etl.service -f -o cat
+# The bundled script installs de-project-2-etl.service:
+sudo systemctl start de-project-2-etl.service
+sudo systemctl status de-project-2-etl.service --no-pager
+sudo journalctl -u de-project-2-etl.service -f -o cat
 ```
 
 `install_service.sh` **installs and enables**, but does **not** start the ETL. Review its unit definition before installing: `ExecStart` must point to your actual `.venv/bin/python` and `main.py`.
@@ -64,7 +64,7 @@ sudo systemctl status de-project-2-etl.service --no-pager
 sudo journalctl -u de-project-2-etl.service -f -o cat
 ```
 
-A new unit must not be enabled/run in parallel with the existing one. To reuse the existing service name in the installer, edit `SERVICE_NAME` in the script **only after reviewing the current installed unit**; this is a deliberate replacement operation, not a routine step.
+A new unit must not be enabled/run in parallel with the existing one. Re-running the installer replaces the existing unit with the bundled definition; this is a deliberate replacement operation, not a routine monitoring step.
 
 ## Part D — How auto-restart works
 
@@ -117,6 +117,8 @@ The `sleep infinity` command **keeps a WSL session alive**; it does *not* run `m
 **Limitations:** No requests run while Windows is shut down or asleep. The task begins at **user logon**, not before. On startup, the Python ETL resumes from the last valid checkpoint. Service uptime depends on WSL/Windows power and session settings.
 
 ## Part F — Verify without disturbing a live collection
+
+For progress, cooldown and disk checks, see [Health monitoring](09-monitoring.md).
 
 ```bash
 sudo systemctl is-enabled de-project-2-etl.service

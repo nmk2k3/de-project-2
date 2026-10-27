@@ -8,3 +8,5 @@ checkpoint.json
 checkpoint.json.tmp
 debug_response.html
 .pipeline.lock
+.crawler-health.json
+.crawler-health.json.tmp
