@@ -1,5 +1,4 @@
 """Durable batch files, checkpoint validation, and append-only failure logs."""
-from fileinput import filename
 import hashlib
 import json
 import os

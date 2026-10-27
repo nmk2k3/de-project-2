@@ -2,12 +2,13 @@
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from app.client import FetchError
+from app.client import FetchError, SecurityChallengeError
 from app.config import Settings
-from app.pipeline import run_pipeline
+from app.pipeline import PipelineResult, run_pipeline
 from app.storage import (
     fingerprint_ids,
     finish_batch,
@@ -47,6 +48,58 @@ class IntegrityTests(unittest.TestCase):
         modified = ["102", "101", "103", "104", "105"]
         with self.assertRaisesRegex(ValueError, "changed"):
             load_checkpoint(self.settings, len(modified), fingerprint_ids(modified))
+
+    def test_invalid_csv_does_not_touch_checkpoint_or_fetch(self):
+        save_checkpoint(self.settings, 1, len(self.ids), self.fp)
+        original = self.settings.checkpoint_file.read_bytes()
+        for contents in ("", "other\n101\n", 'id\n"unterminated',
+                         "id,name\n,missing\n", 'id\n"   "\n101\n'):
+            with self.subTest(contents=contents):
+                self.settings.csv_file.write_text(contents, encoding="utf-8")
+                with patch("app.pipeline.ProductClient") as client:
+                    with self.assertRaises(ValueError):
+                        run_pipeline(self.settings)
+                    client.assert_not_called()
+                self.assertEqual(self.settings.checkpoint_file.read_bytes(), original)
+
+    def test_header_only_csv_completes_without_requests(self):
+        self.settings.csv_file.write_text("id\n", encoding="utf-8")
+        with patch("app.pipeline.ProductClient") as client:
+            self.assertEqual(run_pipeline(self.settings), PipelineResult.COMPLETED)
+            client.assert_not_called()
+        self.assertFalse(self.settings.checkpoint_file.exists())
+
+    def test_security_retry_saves_before_waiting_and_retries_same_id(self):
+        settings = replace(self.settings, max_security_retries=1, security_retry_delay=0)
+        settings.csv_file.write_text("id\n101\n102\n", encoding="utf-8")
+        fingerprint = fingerprint_ids(["101", "102"])
+
+        def check_saved_progress(delay):
+            self.assertEqual(load_checkpoint(settings, 2, fingerprint), 1)
+            partial = json.loads(output_paths(settings, 1)[0].read_text())
+            self.assertEqual([p["id"] for p in partial["products"]], [101])
+
+        with patch("app.pipeline.ProductClient") as client, \
+                patch("app.pipeline.time.sleep", side_effect=check_saved_progress) as sleep:
+            client.return_value.fetch.side_effect = [
+                {"id": 101, "name": "First"},
+                SecurityChallengeError("challenge"),
+                {"id": 102, "name": "Second"},
+            ]
+            self.assertEqual(run_pipeline(settings), PipelineResult.COMPLETED)
+            self.assertEqual([call.args[0] for call in client.return_value.fetch.call_args_list],
+                             ["101", "102", "102"])
+            sleep.assert_called_once_with(0)
+        self.assertEqual(load_checkpoint(settings, 2, fingerprint), 2)
+
+    def test_interrupt_during_security_wait_resumes_current_id(self):
+        settings = replace(self.settings, max_security_retries=1)
+        settings.csv_file.write_text("id\n101\n", encoding="utf-8")
+        with patch("app.pipeline.ProductClient") as client, \
+                patch("app.pipeline.time.sleep", side_effect=KeyboardInterrupt):
+            client.return_value.fetch.side_effect = SecurityChallengeError("challenge")
+            self.assertEqual(run_pipeline(settings), PipelineResult.INTERRUPTED)
+        self.assertEqual(load_checkpoint(settings, 1, fingerprint_ids(["101"])), 0)
 
     def test_partial_recovers_ahead_of_checkpoint(self):
         save_checkpoint(self.settings, 1, len(self.ids), self.fp)

@@ -20,7 +20,7 @@ The Python dependencies are `pandas`, `beautifulsoup4`, and `python-dotenv`. The
 
 ```dotenv
 API_URL=https://api.tiki.vn/product-detail/api/v1/products
-CSV_FILE=product_ids.csv
+CSV_FILE=data/product_ids.csv
 BATCH_SIZE=1000
 REQUEST_DELAY=1
 REQUEST_TIMEOUT=15
@@ -36,7 +36,7 @@ The last two retry settings are supported by `config.py`; they may be absent fro
 | Variable | Default | Explanation |
 |---|---:|---|
 | `API_URL` | product-detail endpoint | URL prefix for one product ID |
-| `CSV_FILE` | `product_ids.csv` | File containing an `id` column; relative paths use project root |
+| `CSV_FILE` | `data/product_ids.csv` | File containing an `id` column; relative paths use project root |
 | `BATCH_SIZE` | `1000` | Number of **input IDs** per output batch; do not change mid-run |
 | `REQUEST_DELAY` | `1` | Minimum seconds between starts of cURL attempts |
 | `REQUEST_TIMEOUT` | `15` | Per-request cURL maximum time, in seconds |
@@ -46,7 +46,9 @@ The last two retry settings are supported by `config.py`; they may be absent fro
 | `MAX_NETWORK_RETRIES` | `2` | Additional transient network/5xx attempts |
 | `RETRY_BASE_DELAY` | `2` | Exponential backoff starts at 2 seconds, then 4 seconds |
 
-Settings validation enforces positive batch size, checkpoint interval and request timeout; retry counts and delays cannot be negative.
+Settings validation applies both to `.env` loading and direct `Settings` construction. Batch size, checkpoint interval and request timeout must be positive integers; retry counts must be nonnegative integers. Delays must be finite and nonnegative. `API_URL` must be an absolute HTTP(S) URL and `CSV_FILE` cannot be blank.
+
+When upgrading an existing checkout, update `CSV_FILE=product_ids.csv` in your local `.env` to `CSV_FILE=data/product_ids.csv`. Moving the file does not invalidate checkpoints: they identify the ordered IDs, not the file path. Do not change the IDs or batch size during this move.
 
 ## Input data rules
 
@@ -58,7 +60,7 @@ id
 214008432
 ```
 
-Keep the **same ordered list of IDs** for the lifetime of a checkpoint. Changing the order or modifying product IDs may cause the fingerprint integrity check to reject resume. A missing or malformed CSV stops execution; it is not treated as a transient HTTP failure.
+Keep the **same ordered list of IDs** for the lifetime of a checkpoint. Changing the order or modifying product IDs may cause the fingerprint integrity check to reject resume. IDs are not trimmed, reordered or deduplicated. Missing or whitespace-only IDs are rejected before checkpoint state is touched. A header-only CSV (`id` with no rows) completes without requests; an empty file or missing `id` column is invalid. A missing or malformed CSV stops execution; it is not treated as a transient HTTP failure.
 
 ## Git ignore recommendations
 

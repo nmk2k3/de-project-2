@@ -44,3 +44,5 @@
 **Write code that is easy to understand, easy to debug, and easy to change. Complexity must be justified, not assumed necessary.**
 
 **Every test should protect against a meaningful bug or regression. Write only as many tests as needed to establish confidence.**
+
+**Using appropriate comment when neccessary for future coding reviews**

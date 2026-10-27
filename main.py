@@ -5,12 +5,12 @@ Exit 75: temporary network/server failure; supervisor may restart later.
 Exit 78: permanent configuration/state problem; fix before restarting.
 Exit 143: SIGTERM; progress saved, supervisor may restart unless explicitly stopped.
 """
-import fcntl
 import signal
 import sys
 
 from app.config import load_settings
 from app.pipeline import PipelineResult, run_pipeline
+from app.runtime import AlreadyRunningError, pipeline_lock
 
 _sigterm_requested = False
 
@@ -27,18 +27,12 @@ def main() -> int:
 
     try:
         settings = load_settings()
-        # flock locks a file descriptor, not the filename; auto-releases on
-        # a crash, power loss or SIGKILL. Prevent parallel manual/service runs.
-        with (settings.root / ".pipeline.lock").open("a+") as lock_file:
-            try:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                print("Another pipeline instance is already running. Exiting.",
-                      file=sys.stderr, flush=True)
-                return 78
-
+        with pipeline_lock(settings.root):
             outcome = run_pipeline(settings)
 
+    except AlreadyRunningError as exc:
+        print(str(exc), file=sys.stderr, flush=True)
+        return 78
     except (ValueError, FileNotFoundError, KeyError) as exc:
         print(f"Fatal configuration/checkpoint/data error: {exc}",
               file=sys.stderr, flush=True)

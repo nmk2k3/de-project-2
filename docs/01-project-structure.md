@@ -2,13 +2,14 @@
 
 ```text
 de-project-2/
-├── main.py                          # CLI entry point / process exit status / single-instance lock
+├── main.py                          # CLI entry point / signals / process exit status
 ├── app/
 │   ├── __init__.py
 │   ├── config.py                    # Settings dataclass; read and validate .env
 │   ├── client.py                    # cURL requests, pacing, error metadata and network retries
 │   ├── transform.py                 # Product field selection; HTML description cleanup
 │   ├── storage.py                   # Atomic JSON, checkpoints, integrity checks and failure logs
+│   ├── runtime.py                   # Single-instance process lock
 │   └── pipeline.py                  # Orchestrates IDs, batches, retries, save/resume
 ├── tests/
 │   ├── test_integrity.py            # Data consistency, file recovery, transform, resume
@@ -22,7 +23,8 @@ de-project-2/
 ├── .env.example                     # Documented default configuration template
 ├── .env                             # Local settings; not committed
 ├── .gitignore
-├── product_ids.csv                  # Input: column named id
+├── data/
+│   └── product_ids.csv              # Input: column named id
 ├── output/                          # Generated batch and partial JSON files
 │   ├── products_001.json
 │   └── products_002.partial.json    # Only while a batch is incomplete
@@ -40,7 +42,8 @@ Generated files are examples; their presence depends on how far the pipeline has
 
 | Module | Main entry points | What it owns |
 |---|---|---|
-| `main.py` | `main()` | SIGTERM handling, Linux `flock`, convert outcomes to exit codes |
+| `main.py` | `main()` | SIGTERM handling, orchestrate execution, convert outcomes to exit codes |
+| `app/runtime.py` | `pipeline_lock()` | Single-instance Linux `flock`, released when the file closes |
 | `app/config.py` | `Settings`, `load_settings()` | Absolute paths, environment variables, validation |
 | `app/client.py` | `ProductClient.fetch()` | HTTP request pacing, cURL execution, errors and bounded transient retries |
 | `app/transform.py` | `clean_description()`, `transform_product()` | Clean HTML and create normalized output object |

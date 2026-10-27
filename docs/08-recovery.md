@@ -69,7 +69,7 @@ sudo journalctl -u de-project-2-etl.service -n 50 --no-pager
 
 ## Deployment checklist
 
-1. Preserve `.env`, `product_ids.csv`, `checkpoint.json`, `output/`, and `logs/`.
+1. Preserve `.env`, `data/product_ids.csv`, `checkpoint.json`, `output/`, and `logs/`.
 2. Back up source files before replacing them.
 3. Gracefully stop the **existing** service during deployment.
 4. Run `unittest` and confirm tests pass.

@@ -6,7 +6,7 @@ This describes a **new installation** and also how to inspect an **already confi
 
 ## Part A — Prepare the project on Ubuntu WSL
 
-1. Verify WSL Ubuntu is running and the project contains `main.py`, `app/`, `product_ids.csv` and `scripts/install_service.sh`.
+1. Verify WSL Ubuntu is running and the project contains `main.py`, `app/`, `data/product_ids.csv` and `scripts/install_service.sh`.
 2. Ensure Python and cURL are available, and create the project's virtual environment.
 3. Install Python requirements and prepare local environment configuration.
 

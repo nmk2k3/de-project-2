@@ -1,7 +1,9 @@
 """Read settings from .env; keep paths relative to the project, not the terminal."""
 from dataclasses import dataclass
+import math
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -22,6 +24,25 @@ class Settings:
     max_network_retries: int = 2
     retry_base_delay: float = 2.0
 
+    def __post_init__(self) -> None:
+        """Validate direct construction as well as environment-loaded settings."""
+        for name in ("batch_size", "checkpoint_every", "request_timeout"):
+            value = getattr(self, name)
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"{name.upper()} must be a positive integer")
+        for name in ("max_security_retries", "max_network_retries"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name.upper()} must be a nonnegative integer")
+        for name in ("request_delay", "security_retry_delay", "retry_base_delay"):
+            value = getattr(self, name)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value < 0):
+                raise ValueError(f"{name.upper()} must be finite and nonnegative")
+        url = urlsplit(self.api_url)
+        if url.scheme not in ("http", "https") or not url.hostname:
+            raise ValueError("API_URL must be an absolute HTTP or HTTPS URL")
+
     @property
     def output_dir(self) -> Path:
         return self.root / "output"
@@ -37,11 +58,14 @@ class Settings:
 
 def load_settings() -> Settings:
     load_dotenv(PROJECT_DIR / ".env")
-    csv_file = Path(os.getenv("CSV_FILE", "product_ids.csv"))
+    csv_path = os.getenv("CSV_FILE", "data/product_ids.csv").strip()
+    if not csv_path:
+        raise ValueError("CSV_FILE must not be empty")
+    csv_file = Path(csv_path)
     if not csv_file.is_absolute():
         csv_file = PROJECT_DIR / csv_file
 
-    settings = Settings(
+    return Settings(
         root=PROJECT_DIR,
         api_url=os.getenv("API_URL", "https://api.tiki.vn/product-detail/api/v1/products").rstrip("/"),
         csv_file=csv_file,
@@ -54,12 +78,3 @@ def load_settings() -> Settings:
         max_network_retries=int(os.getenv("MAX_NETWORK_RETRIES", "2")),
         retry_base_delay=float(os.getenv("RETRY_BASE_DELAY", "2")),
     )
-    if settings.batch_size <= 0 or settings.checkpoint_every <= 0:
-        raise ValueError("BATCH_SIZE and CHECKPOINT_EVERY must be positive")
-    if settings.request_delay < 0 or settings.request_timeout <= 0:
-        raise ValueError("REQUEST_DELAY must be >= 0 and REQUEST_TIMEOUT must be > 0")
-    if settings.security_retry_delay < 0 or settings.max_security_retries < 0:
-        raise ValueError("Security retry configuration must be nonnegative")
-    if settings.max_network_retries < 0 or settings.retry_base_delay < 0:
-        raise ValueError("Network retry configuration must be nonnegative")
-    return settings
